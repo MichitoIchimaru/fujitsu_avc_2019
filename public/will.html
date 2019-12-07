@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+        <meta
+            name="viewport"
+            content="width=device-width, maximum-scale=1.0, minimum-scale=1.0, initial-scale=1.0, user-scalable=no"
+        />
+        <title>WILL Sample</title>
+
+        <script id="2d-vertex-shader" type="x-shader/x-vertex"></script>
+        <script type="text/javascript" src="js/inkrecognizer.js"></script>
+        <script type="text/javascript" src="js/axios.min.js"></script>
+        <script type="text/javascript" src="js/jquery.min.js"></script>
+        <script type="text/javascript" src="js/js.ext.js"></script>
+        <script type="text/javascript" src="lib/will/Module.js"></script>
+        <script
+            async
+            type="text/javascript"
+            src="lib/will/WacomInkEngine.js"
+        ></script>
+        <script>
+            let inkRecognizer;
+            window.addEventListener("load", () => {
+                inkRecognizer = new InkRecognizer();
+            });
+
+            const WILL = {
+                backgroundColor: Module.Color.from(204, 204, 204, 1),
+                color: Module.Color.from(0, 0, 0, 0.85),
+
+                strokes: new Array(),
+
+                init: function(width, height) {
+                    this.initInkEngine(width, height);
+                    this.initEvents();
+                },
+
+                initInkEngine: function(width, height) {
+                    this.canvas = new Module.InkCanvas(
+                        document.getElementById("canvas"),
+                        width,
+                        height
+                    );
+                    this.strokesLayer = this.canvas.createLayer();
+
+                    this.clear();
+
+                    this.brush = new Module.SolidColorBrush();
+
+                    this.pathBuilder = new Module.SpeedPathBuilder();
+                    this.pathBuilder.setNormalizationConfig(5, 210);
+                    this.pathBuilder.setPropertyConfig(
+                        Module.PropertyName.Width,
+                        5.0,
+                        0.0,
+                        0.0,
+                        NaN,
+                        //Module.PropertyFunction.Power,
+                        Module.PropertyFunction.Sigmoid,
+                        0.1,
+                        true
+                    );
+
+                    this.smoothener = new Module.MultiChannelSmoothener(
+                        this.pathBuilder.stride
+                    );
+
+                    this.strokeRenderer = new Module.StrokeRenderer(
+                        this.canvas
+                    );
+                    this.strokeRenderer.configure({
+                        brush: this.brush,
+                        color: this.color
+                    });
+                },
+
+                initEvents: function() {
+                    const self = this;
+
+                    Module.canvas.addEventListener("pointerdown", function(e) {
+                        self.beginStroke(e);
+                    });
+                    Module.canvas.addEventListener("pointermove", function(e) {
+                        self.moveStroke(e);
+                    });
+                    document.addEventListener("pointerup", function(e) {
+                        self.endStroke(e);
+                    });
+
+                    document.addEventListener(
+                        "touchmove",
+                        function(е) {
+                            е.preventDefault();
+                        },
+                        { passive: false }
+                    );
+                },
+
+                beginStroke: function(e, x, y) {
+                    if (e != null) {
+                        if (e.button != 0) return;
+                    }
+
+                    this.inputPhase = Module.InputPhase.Begin;
+
+                    this.buildPath({
+                        x: x != null ? x : e.clientX,
+                        y: y != null ? y : e.clientY
+                    });
+                    this.drawPath();
+                },
+
+                moveStroke: function(e, x, y) {
+                    if (!this.inputPhase) return;
+
+                    this.inputPhase = Module.InputPhase.Move;
+                    this.pointerPos = {
+                        x: x != null ? x : e.clientX,
+                        y: y != null ? y : e.clientY
+                    };
+
+                    if (WILL.frameID != WILL.canvas.frameID) {
+                        const self = this;
+
+                        WILL.frameID = WILL.canvas.requestAnimationFrame(
+                            function() {
+                                if (
+                                    self.inputPhase &&
+                                    self.inputPhase == Module.InputPhase.Move
+                                ) {
+                                    self.buildPath(self.pointerPos);
+                                    self.drawPath();
+                                }
+                            },
+                            true
+                        );
+                    }
+                },
+
+                endStroke: function(e, x, y) {
+                    if (!this.inputPhase) return;
+
+                    this.inputPhase = Module.InputPhase.End;
+
+                    this.buildPath({
+                        x: x != null ? x : e.clientX,
+                        y: y != null ? y : e.clientY
+                    });
+                    this.drawPath();
+
+                    const stroke = new Module.Stroke(
+                        this.brush,
+                        this.path,
+                        NaN,
+                        this.color,
+                        0,
+                        1
+                    );
+                    this.strokes.push(stroke);
+
+                    delete this.inputPhase;
+                },
+
+                buildPath: function(pos) {
+                    if (this.inputPhase == Module.InputPhase.Begin)
+                        this.smoothener.reset();
+
+                    const pathPart = this.pathBuilder.addPoint(
+                        this.inputPhase,
+                        pos,
+                        Date.now() / 1000
+                    );
+                    const smoothedPathPart = this.smoothener.smooth(
+                        pathPart,
+                        this.inputPhase == Module.InputPhase.End
+                    );
+                    const pathContext = this.pathBuilder.addPathPart(
+                        smoothedPathPart
+                    );
+
+                    this.pathPart = pathContext.getPathPart();
+                    this.path = pathContext.getPath();
+
+                    if (this.inputPhase == Module.InputPhase.Move) {
+                        const preliminaryPathPart = this.pathBuilder.createPreliminaryPath();
+                        const preliminarySmoothedPathPart = this.smoothener.smooth(
+                            preliminaryPathPart,
+                            true
+                        );
+
+                        this.preliminaryPathPart = this.pathBuilder.finishPreliminaryPath(
+                            preliminarySmoothedPathPart
+                        );
+                    }
+                },
+
+                drawPath: function() {
+                    if (this.inputPhase == Module.InputPhase.Begin) {
+                        this.strokeRenderer.draw(this.pathPart, false);
+                        this.strokeRenderer.blendUpdatedArea();
+                    } else if (this.inputPhase == Module.InputPhase.Move) {
+                        this.strokeRenderer.draw(this.pathPart, false);
+                        this.strokeRenderer.drawPreliminary(
+                            this.preliminaryPathPart
+                        );
+
+                        this.canvas.clear(
+                            this.strokeRenderer.updatedArea,
+                            this.backgroundColor
+                        );
+                        this.canvas.blend(this.strokesLayer, {
+                            rect: this.strokeRenderer.updatedArea
+                        });
+
+                        this.strokeRenderer.blendUpdatedArea();
+                    } else if (this.inputPhase == Module.InputPhase.End) {
+                        this.strokeRenderer.draw(this.pathPart, true);
+                        this.strokeRenderer.blendStroke(
+                            this.strokesLayer,
+                            Module.BlendMode.NORMAL
+                        );
+
+                        this.canvas.clear(
+                            this.strokeRenderer.strokeBounds,
+                            this.backgroundColor
+                        );
+                        this.canvas.blend(this.strokesLayer, {
+                            rect: this.strokeRenderer.strokeBounds
+                        });
+                    }
+                },
+
+                clear: function() {
+                    this.strokes = new Array();
+
+                    this.strokesLayer.clear(this.backgroundColor);
+                    this.canvas.clear(this.backgroundColor);
+                }
+            };
+
+            Module.addPostScript(function() {
+                Module.InkDecoder.getStrokeBrush = function(paint) {
+                    return WILL.brush;
+                };
+
+                WILL.init(1000, 300);
+            });
+
+            async function convert() {
+                const recognized = await inkRecognizer.convert(
+                    inkRecognizer.will2InkRecognizer(WILL.strokes)
+                );
+                const recognizedText = inkRecognizer.getRecognizedText(
+                    recognized
+                );
+                console.log("text = " + recognizedText);
+            }
+        </script>
+    </head>
+    <body style="margin:0;padding:0;">
+        <canvas id="canvas" oncontextmenu="event.preventDefault();"></canvas>
+        <br /><input
+            type="button"
+            value="convert"
+            onclick="javascript:convert()"
+        />
+    </body>
+</html>

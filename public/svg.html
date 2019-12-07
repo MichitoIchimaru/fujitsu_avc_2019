@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>SVG Sample</title>
+        <!--<script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.js@3.0/dist/svg.min.js"></script>-->
+        <script type="text/javascript" src="js/svg.min.js"></script>
+        <script type="text/javascript" src="js/inkrecognizer.js"></script>
+        <script type="text/javascript" src="js/axios.min.js"></script>
+        <script>
+            let inkRecognizer;
+
+            window.addEventListener("load", () => {
+                inkRecognizer = new InkRecognizer();
+                init();
+            });
+
+            let canvas;
+            let drawFlag = false;
+            let drawPath = null;
+            let drawPoints = [];
+            const strokes = [];
+            let stroke = {
+                color: "#000",
+                width: 2,
+                linecap: "round",
+                linejoin: "round"
+            };
+
+            function init() {
+                canvas = SVG("canvas").size(1000, 300);
+                canvas.rect(1000, 300).attr({ fill: "#cccccc" });
+                canvas.on("touchstart", touchStart);
+                canvas.on("touchmove", touchMove);
+                canvas.on("touchend", touchEnd);
+            }
+
+            function touchStart(ev) {
+                drawFlag = true;
+                drawPath = null;
+                drawPoints = [];
+            }
+
+            function touchMove(ev) {
+                if (drawFlag) {
+                    const rectX = document
+                        .getElementById("canvas")
+                        .getBoundingClientRect().x;
+                    const rectY = document
+                        .getElementById("canvas")
+                        .getBoundingClientRect().y;
+                    const touchX = ev.changedTouches[0].clientX;
+                    const touchY = ev.changedTouches[0].clientY;
+                    const scrollX = document.getElementById("canvas")
+                        .scrollLeft;
+                    const scrollY = document.getElementById("canvas").scrollTop;
+                    const x = touchX + scrollX - rectX;
+                    const y = touchY + scrollY - rectY;
+                    if (x < 0) x = 0;
+                    if (y < 0) y = 0;
+                    drawPoints.push({ x: x, y: y });
+                    drawFreeHand();
+                    event.preventDefault();
+                }
+            }
+
+            function touchEnd(ev) {
+                drawFlag = false;
+                if (!drawPath) return;
+                drawFreeHand();
+                drawPath = null;
+            }
+
+            function drawFreeHand() {
+                if (drawPath) {
+                    drawPath.remove();
+                }
+                let path = "";
+                for (const idx in drawPoints) {
+                    const point = drawPoints[idx];
+                    if (idx == 0) {
+                        path += `M${point.x} ${point.y}`;
+                    } else {
+                        path += ` L${point.x} ${point.y}`;
+                    }
+                }
+                drawPath = canvas
+                    .path(path)
+                    .fill("none")
+                    .stroke(stroke);
+                if (!drawFlag) {
+                    strokes.push(path);
+                }
+            }
+
+            async function convert() {
+                const recognized = await inkRecognizer.convert(
+                    inkRecognizer.svg2InkRecognizer(strokes)
+                );
+                const recognizedText = inkRecognizer.getRecognizedText(
+                    recognized
+                );
+                console.log("text = " + recognizedText);
+            }
+        </script>
+    </head>
+    <body style="margin:0;padding:0;">
+        <div id="canvas" style="margin:0;padding:0;"></div>
+        <input type="button" value="convert" onclick="javascript:convert()" />
+    </body>
+</html>

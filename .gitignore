@@ -1,0 +1,7 @@
+package-lock.json
+fujitsu_avc_2019.code-workspace
+/.vscode
+/node_modules
+/public/lib/will/Module.js
+/public/lib/will/WacomInkEngine.js
+/public/lib/will/WacomInkEngine.js.mem
